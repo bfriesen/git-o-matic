@@ -8,7 +8,6 @@ using Microsoft.Build.Evaluation;
 using Microsoft.Build.Execution;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Logging;
-using Newtonsoft.Json;
 
 namespace FileWatcherSpike
 {
@@ -22,28 +21,25 @@ namespace FileWatcherSpike
         static void Main(string[] args)
         {
             // this should be loaded from a file specified in args
-            const string configJson = @"
-{
-    ""MSBuild"":
-    {
-        ""ProjectFile"":""C:\\Users\\bfriesen\\Documents\\Visual Studio 2013\\Projects\\PrimeFactorsKata\\PrimeFactorsKata.sln"",
-        ""Options"":
-        {
-            ""Configuration"":""Release"",
-            ""Platform"":""Any CPU"",
-            ""OutputPath"":""C:\\Temp\\asdfasdf""
+            const string configJson = 
+@"{
+    ""MSBuild"" : {
+        ""ProjectFile"" : ""C:\\Users\\bfriesen\\Documents\\visual studio 2013\\Projects\\JsonParserSpike\\JsonParserSpike.sln"",
+        ""Options"" : {
+            ""Configuration"" : ""Release"",
+            ""Platform"" : ""Any CPU"",
+            ""OutputPath"" : ""C:\\Temp\\JsonParserSpike""
         }
     },
-    ""TestAssemblyFileNames"":[""PrimeFactorsKata.Tests.dll""],
-    ""Git"":
-    {
-        ""Path"":""C:\\Users\\bfriesen\\Documents\\Visual Studio 2013\\Projects\\PrimeFactorsKata"",
-        ""Message"":""Test 1.""
+    ""TestAssemblyFileNames"" : [ ""JsonParserSpike.Tests.dll"" ],
+    ""Git"" : {
+        ""Path"" : ""C:\\Users\\bfriesen\\Documents\\visual studio 2013\\Projects\\JsonParserSpike"",
+        ""Message"" : ""Deserialize with Sprache.""
     }
 }";
-            var config = JsonConvert.DeserializeObject<Config>(configJson);
+            var config = Json.Deserialize(configJson);
 
-            _timer = new Timer(Elapsed, config, Timeout.Infinite, Timeout.Infinite);
+            _timer = new Timer(Elapsed, (object)config, Timeout.Infinite, Timeout.Infinite);
             _watcher = new FileSystemWatcher(config.Git.Path)
             {
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName,
@@ -56,6 +52,8 @@ namespace FileWatcherSpike
             _watcher.Renamed += OnChanged;
 
             _watcher.EnableRaisingEvents = true;
+
+            _timer.Change(_timerDelay, Timeout.Infinite);
 
             Console.WriteLine("Press \'q\' to quit.");
             while (Console.Read() != 'q') { }
@@ -77,7 +75,7 @@ namespace FileWatcherSpike
 
         private static void Elapsed(object state)
         {
-            var config = (Config)state;
+            dynamic config = state;
 
             // Only one thread is allowed to be processing the file changes
             // at any given time. But threads shouldn't block if they can't
@@ -112,7 +110,7 @@ namespace FileWatcherSpike
             Interlocked.Exchange(ref _isProcessing, 0);
         }
 
-        private static void ProcessFileChanges(Config config)
+        private static void ProcessFileChanges(dynamic config)
         {
             Console.WriteLine("Starting build...");
 
@@ -147,16 +145,16 @@ namespace FileWatcherSpike
             Console.WriteLine("Git commit successful.");
         }
 
-        private static bool TryBuild(MSBuild build)
+        private static bool TryBuild(dynamic build)
         {
             return TryBuild(build, "Clean") && TryBuild(build, "Build");
         }
 
-        private static bool TryBuild(MSBuild build, string target)
+        private static bool TryBuild(dynamic build, string target)
         {
             try
             {
-                var props = build.Options.ToDictionary();
+                var props = GetDictionary(build.Options);
 
                 var loggers = new ILogger[] { new ConsoleLogger() };
 
@@ -184,6 +182,11 @@ namespace FileWatcherSpike
             }
         }
 
+        private static IDictionary<string, string> GetDictionary(IDictionary<string, object> options)
+        {
+            return options.ToDictionary(x => x.Key, x => x.Value.ToString());
+        }
+
         private static bool TryTests(string buildOutputPath, IEnumerable<string> testAssemblyFilePaths)
         {
             return TryTests(testAssemblyFilePaths.Select(x => Path.Combine(buildOutputPath, x)).ToArray());
@@ -201,9 +204,26 @@ namespace FileWatcherSpike
             {
                 using (var r = new Repository(gitRepoPath))
                 {
-                    foreach (var item in r.Index)
+                    var status = r.RetrieveStatus();
+
+                    var toStage =
+                        status.Where(s =>
+                            (s.State & FileStatus.Untracked) != 0
+                            || (s.State & FileStatus.Modified) != 0
+                            || (s.State & FileStatus.RenamedInWorkDir) != 0);
+
+                    var toRemove =
+                        status.Where(s =>
+                            (s.State & FileStatus.Missing) != 0);
+
+                    foreach (var item in toStage)
                     {
-                        r.Stage(item.Path);
+                        r.Stage(item.FilePath);
+                    }
+
+                    foreach (var item in toRemove)
+                    {
+                        r.Remove(item.FilePath);
                     }
 
                     r.Commit(message);

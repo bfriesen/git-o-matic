@@ -9,21 +9,51 @@ using Sprache;
 namespace FileWatcherSpike
 {
     // Json spec: http://tools.ietf.org/html/rfc7159
-    public static class Json
+    public class JsonSerializer
     {
-        // http://stackoverflow.com/a/8571649/252004
-        private const string _base64Pattern =
-            "^([A-Za-z0-9+/]{4})+([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)$";
-        private static readonly Regex _base64Regex = new Regex(_base64Pattern, RegexOptions.Compiled | RegexOptions.ExplicitCapture);
+        private static readonly Regex _base64Regex;
 
-        private static readonly Parser<char> _whiteSpace;
-        private static readonly Parser<char> _valueSeparator;
-        private static readonly Parser<string> _string;
+        private static readonly TryParseFunc<DateTime> _defaultParseDateTime;
+        private static readonly TryParseFunc<Guid> _defaultParseGuid;
+        private static readonly TryParseFunc<byte[]> _defaultParseBytes;
 
-        private static readonly Parser<object> _mainParser;
+        private readonly IEnumerable<TryParseFunc<object>> _tryParseFuncs;
 
-        static Json()
+        private readonly Parser<char> _whiteSpace;
+        private readonly Parser<char> _valueSeparator;
+        private readonly Parser<string> _string;
+
+        private readonly Parser<object> _valueParser;
+
+        static JsonSerializer()
         {
+            // http://stackoverflow.com/a/8571649/252004
+            _base64Regex = new Regex(
+                "^([A-Za-z0-9+/]{4})+([A-Za-z0-9+/]{4}|[A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)$",
+                RegexOptions.Compiled | RegexOptions.ExplicitCapture);
+
+            _defaultParseDateTime =
+                (string s, out DateTime value) =>
+                    DateTime.TryParseExact(s, "yyyy-MM-ddTHH:mm:ss.FFFFFFFK", CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out value);
+
+            _defaultParseGuid = (string s, out Guid value) => Guid.TryParseExact(s, "D", out value);
+            _defaultParseBytes = (string s, out byte[] value) => TryParseBase64ByteArray(s, out value);
+        }
+
+        public JsonSerializer()
+            : this(null, null, null)
+        {
+        }
+
+        public JsonSerializer(
+            TryParseFunc<DateTime> parseDateTime = null,
+            TryParseFunc<Guid> parseGuid = null,
+            TryParseFunc<byte[]> parseBytes = null,
+            params TryParseFunc<object>[] additionalParseFuncs)
+        {
+            _tryParseFuncs = GetTryParseFuncs(parseDateTime, parseGuid, parseBytes, additionalParseFuncs);
+
             _whiteSpace = Parse.Char(c => c == ' ' || c == '\n' || c == '\r' || c == '\t', "Whitespace");
             _valueSeparator = ParseStructuralCharacter(',');
 
@@ -36,16 +66,49 @@ namespace FileWatcherSpike
             var @object = ParseObject();
             var array = ParseArray();
 
-            _mainParser =
+            _valueParser =
                 from ws1 in _whiteSpace.Many()
                 from v in literal.Or(number).Or(valueFromString).Or(@object).Or(array)
                 from ws2 in _whiteSpace.Many()
                 select v;
         }
 
-        public static dynamic Deserialize(string raw)
+        public dynamic Deserialize(string json)
         {
-            return _mainParser.Parse(raw);
+            return _valueParser.Parse(json);
+        }
+
+        private static IEnumerable<TryParseFunc<object>> GetTryParseFuncs(
+            TryParseFunc<DateTime> parseDateTime,
+            TryParseFunc<Guid> parseGuid,
+            TryParseFunc<byte[]> parseBytes,
+            TryParseFunc<object>[] additionalParseFuncs)
+        {
+            return (additionalParseFuncs ?? new TryParseFunc<object>[0])
+                .Concat(
+                    new[]
+                    {
+                        ConvertParseFunc(parseDateTime ?? _defaultParseDateTime),
+                        ConvertParseFunc(parseGuid ?? _defaultParseGuid),
+                        ConvertParseFunc(parseBytes ?? _defaultParseBytes)
+                    })
+                .ToArray();
+        }
+
+        private static TryParseFunc<object> ConvertParseFunc<T>(TryParseFunc<T> f)
+        {
+            return (string s, out object value) =>
+            {
+                T t;
+                if (f(s, out t))
+                {
+                    value = t;
+                    return true;
+                }
+
+                value = default(T);
+                return false;
+            };
         }
 
         private static Parser<object> ParseLiteral()
@@ -152,37 +215,27 @@ namespace FileWatcherSpike
             return (char)int.Parse(new string(chars), NumberStyles.HexNumber);
         }
 
-        private static object GetValueFromString(string stringValue)
+        private object GetValueFromString(string stringValue)
         {
-            Guid guid;
-            if (Guid.TryParseExact(stringValue, "D", out guid))
+            foreach (var tryParse in _tryParseFuncs)
             {
-                return guid;
-            }
-
-            DateTime dateTime;
-            if (DateTime.TryParseExact(stringValue, "o", CultureInfo.InvariantCulture,
-                DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeLocal, out dateTime))
-            {
-                return dateTime;
-            }
-
-            byte[] byteArray;
-            if (TryGetBase64ByteArray(stringValue, out byteArray))
-            {
-                return byteArray;
+                object value;
+                if (tryParse(stringValue, out value))
+                {
+                    return value;
+                }
             }
 
             return stringValue;
         }
 
-        private static bool TryGetBase64ByteArray(string stringValue, out byte[] byteArray)
+        private static bool TryParseBase64ByteArray(string stringValue, out byte[] bytes)
         {
             if (stringValue.Length % 4 == 0 && _base64Regex.IsMatch(stringValue))
             {
                 try
                 {
-                    byteArray = Convert.FromBase64String(stringValue);
+                    bytes = Convert.FromBase64String(stringValue);
                     return true;
                 }
                 catch
@@ -190,11 +243,11 @@ namespace FileWatcherSpike
                 }
             }
 
-            byteArray = null;
+            bytes = null;
             return false;
         }
 
-        private static Parser<object> ParseObject()
+        private Parser<object> ParseObject()
         {
             var nameSeparator = ParseStructuralCharacter(':');
             var beginObject = ParseStructuralCharacter('{');
@@ -203,7 +256,7 @@ namespace FileWatcherSpike
             var member =
                 from name in _string
                 from s in nameSeparator
-                from v in Parse.Ref(() => _mainParser)
+                from v in Parse.Ref(() => _valueParser)
                 select Tuple.Create(name, v);
 
             return
@@ -236,17 +289,17 @@ namespace FileWatcherSpike
             return expando;
         }
 
-        private static Parser<object> ParseArray()
+        private Parser<object> ParseArray()
         {
             var beginArray = ParseStructuralCharacter('[');
             var endArray = ParseStructuralCharacter(']');
 
             return
                 from b in beginArray
-                from first in Parse.Ref(() => _mainParser).Optional()
+                from first in Parse.Ref(() => _valueParser).Optional()
                 from rest in
                     (from vs in _valueSeparator
-                     from v in Parse.Ref(() => _mainParser)
+                     from v in Parse.Ref(() => _valueParser)
                      select v).Many()
                 from e in endArray
                 select GetArray(first, rest);
@@ -257,7 +310,7 @@ namespace FileWatcherSpike
             return (first.IsDefined ? new[] { first.Get() } : Enumerable.Empty<object>()).Concat(rest).ToArray();
         }
 
-        private static Parser<char> ParseStructuralCharacter(char c)
+        private Parser<char> ParseStructuralCharacter(char c)
         {
             return
                 from ws1 in _whiteSpace.Many()

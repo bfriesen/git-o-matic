@@ -37,9 +37,12 @@ namespace FileWatcherSpike
         ""Message"" : ""Deserialize with Sprache.""
     }
 }";
-            var config = Json.Deserialize(configJson);
 
-            _timer = new Timer(Elapsed, (object)config, Timeout.Infinite, Timeout.Infinite);
+            var serializer = new JsonSerializer();
+
+            var config = serializer.Deserialize(configJson);
+
+            _timer = new Timer(new TimerCallback(Elapsed), config, Timeout.Infinite, Timeout.Infinite);
             _watcher = new FileSystemWatcher(config.Git.Path)
             {
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName,

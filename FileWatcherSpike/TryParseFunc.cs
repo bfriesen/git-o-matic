@@ -1,4 +1,4 @@
 ﻿namespace FileWatcherSpike
 {
-    public delegate bool TryParseFunc<T>(string s, out T value);
+    public delegate bool TryParseFunc<T>(string input, out T value);
 }

@@ -5,12 +5,12 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("FileWatcherSpike")]
+[assembly: AssemblyTitle("git-o-matic")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("FileWatcherSpike")]
-[assembly: AssemblyCopyright("Copyright ©  2015")]
+[assembly: AssemblyProduct("git-o-matic")]
+[assembly: AssemblyCopyright("Copyright © Brian Friesen 2015")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -20,7 +20,7 @@ using System.Runtime.InteropServices;
 [assembly: ComVisible(false)]
 
 // The following GUID is for the ID of the typelib if this project is exposed to COM
-[assembly: Guid("601e0a9a-1939-468a-86aa-53d795558b6a")]
+[assembly: Guid("d2604f72-9ca6-4188-9fa0-40e169355a03")]
 
 // Version information for an assembly consists of the following four values:
 //

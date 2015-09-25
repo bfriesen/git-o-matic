@@ -9,7 +9,7 @@ using Microsoft.Build.Execution;
 using Microsoft.Build.Framework;
 using Microsoft.Build.Logging;
 
-namespace FileWatcherSpike
+namespace GitOMatic
 {
     class Program
     {
@@ -18,32 +18,20 @@ namespace FileWatcherSpike
         private static int _isProcessing;
         private static FileSystemWatcher _watcher;
 
+        private static string _configPath;
+        private static dynamic _config;
+
         static void Main(string[] args)
         {
-            // this should be loaded from a file specified in args
-            const string configJson = 
-@"{
-    ""MSBuild"" : {
-        ""ProjectFile"" : ""C:\\Users\\bfriesen\\Documents\\visual studio 2013\\Projects\\JsonParserSpike\\JsonParserSpike.sln"",
-        ""Options"" : {
-            ""Configuration"" : ""Release"",
-            ""Platform"" : ""Any CPU"",
-            ""OutputPath"" : ""C:\\Temp\\JsonParserSpike""
-        }
-    },
-    ""TestAssemblyFileNames"" : [ ""JsonParserSpike.Tests.dll"" ],
-    ""Git"" : {
-        ""Path"" : ""C:\\Users\\bfriesen\\Documents\\visual studio 2013\\Projects\\JsonParserSpike"",
-        ""Message"" : ""Deserialize with Sprache.""
-    }
-}";
+            _configPath = args[0];
+            var configJson = File.ReadAllText(_configPath);
 
             var serializer = new JsonSerializer();
 
-            var config = serializer.Deserialize(configJson);
+            _config = serializer.Deserialize(configJson);
 
-            _timer = new Timer(new TimerCallback(Elapsed), config, Timeout.Infinite, Timeout.Infinite);
-            _watcher = new FileSystemWatcher(config.Git.Path)
+            _timer = new Timer(Elapsed, null, Timeout.Infinite, Timeout.Infinite);
+            _watcher = new FileSystemWatcher(_config.Git.Path)
             {
                 NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.DirectoryName,
                 IncludeSubdirectories = true
@@ -58,8 +46,67 @@ namespace FileWatcherSpike
 
             _timer.Change(_timerDelay, Timeout.Infinite);
 
-            Console.WriteLine("Press \'q\' to quit.");
-            while (Console.Read() != 'q') { }
+            Console.WriteLine("Enter \'q\' to quit.");
+            Console.WriteLine("Enter anything else to set the current message.");
+
+            string message;
+
+            while ((message = Console.ReadLine()) != "q")
+            {
+                _config.Git.Message = message;
+                WriteConfig();
+                Console.WriteLine("Message set to: {0}", message);
+            }
+        }
+
+        private static void WriteConfig()
+        {
+            using (var writer = new StreamWriter(_configPath))
+            {
+                writer.WriteLine("{");
+
+                writer.WriteLine("    \"MSBuild\" : {");
+
+                writer.Write("        \"ProjectFile\" : \"");
+                writer.Write(((string)_config.MSBuild.ProjectFile).Replace("\\", "\\\\").Replace("\"", "\\\""));
+                writer.WriteLine("\",");
+
+                writer.WriteLine("        \"Options\" : {");
+
+                writer.Write("            \"Configuration\" : \"");
+                writer.Write(_config.MSBuild.Options.Configuration);
+                writer.WriteLine("\",");
+
+                writer.Write("            \"Platform\" : \"");
+                writer.Write(_config.MSBuild.Options.Platform);
+                writer.WriteLine("\",");
+
+                writer.Write("            \"OutputPath\" : \"");
+                writer.Write(((string)_config.MSBuild.Options.OutputPath).Replace("\\", "\\\\").Replace("\"", "\\\""));
+                writer.WriteLine("\"");
+
+                writer.WriteLine("        }");
+
+                writer.WriteLine("    },");
+
+                writer.Write("    \"TestAssemblyFileNames\" : [ ");
+                writer.Write(string.Join(", ", ((object[])_config.TestAssemblyFileNames).Select(x => "\"" + x + "\"")));
+                writer.WriteLine(" ],");
+
+                writer.WriteLine("    \"Git\" : {");
+
+                writer.Write("        \"Path\" : \"");
+                writer.Write(((string)_config.Git.Path).Replace("\\", "\\\\").Replace("\"", "\\\""));
+                writer.WriteLine("\",");
+
+                writer.Write("        \"Message\" : \"");
+                writer.Write(((string)_config.Git.Message).Replace("\\", "\\\\").Replace("\"", "\\\""));
+                writer.WriteLine("\"");
+
+                writer.WriteLine("    }");
+
+                writer.Write("}");
+            }
         }
 
         private static void OnChanged(object source, FileSystemEventArgs e)
@@ -78,8 +125,6 @@ namespace FileWatcherSpike
 
         private static void Elapsed(object state)
         {
-            dynamic config = state;
-
             // Only one thread is allowed to be processing the file changes
             // at any given time. But threads shouldn't block if they can't
             // obtain the lock - just try again later.
@@ -89,7 +134,7 @@ namespace FileWatcherSpike
                 try
                 {
                     _watcher.EnableRaisingEvents = false;
-                    ProcessFileChanges(config);
+                    ProcessFileChanges(_config);
                 }
                 finally
                 {
@@ -190,9 +235,9 @@ namespace FileWatcherSpike
             return options.ToDictionary(x => x.Key, x => x.Value.ToString());
         }
 
-        private static bool TryTests(string buildOutputPath, IEnumerable<string> testAssemblyFilePaths)
+        private static bool TryTests(string buildOutputPath, IEnumerable<object> testAssemblyFilePaths)
         {
-            return TryTests(testAssemblyFilePaths.Select(x => Path.Combine(buildOutputPath, x)).ToArray());
+            return TryTests(testAssemblyFilePaths.Select(x => Path.Combine(buildOutputPath, (string)x)).ToArray());
         }
 
         private static bool TryTests(string[] testAssemblyFilePaths)
@@ -234,8 +279,9 @@ namespace FileWatcherSpike
 
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine(ex);
                 return false;
             }
         }

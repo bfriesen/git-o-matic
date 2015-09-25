@@ -6,7 +6,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Sprache;
 
-namespace FileWatcherSpike
+namespace GitOMatic
 {
     // Json spec: http://tools.ietf.org/html/rfc7159
     public class JsonSerializer
